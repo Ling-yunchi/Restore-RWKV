@@ -19,14 +19,14 @@ io = dataIO()
 
 
 def save_model(net_model, save_dir, optimizer=None, ex=""):
-    save_path = os.path.join(save_dir, "Model")
+    save_path = os.path.join(save_dir, "model")
     mkdir(save_path)
-    G_save_path = os.path.join(save_path, 'Generator{}.pth'.format(ex))
+    G_save_path = os.path.join(save_path, 'model_{}.pth'.format(ex))
     torch.save(net_model.cpu().state_dict(), G_save_path)
     net_model.cuda()
 
     if optimizer is not None:
-        opt_G_save_path = os.path.join(save_path, 'Optimizer_G{}.pth'.format(ex))
+        opt_G_save_path = os.path.join(save_path, 'optimizer_{}.pth'.format(ex))
         torch.save(optimizer.state_dict(), opt_G_save_path)
 
 
@@ -51,6 +51,15 @@ model_path = None
 optimizer_path = None
 
 img_size = (256, 256)
+
+# save to run_{i} folder
+if os.path.exists(save_dir):
+    dirs = os.listdir(save_dir)
+    dirs = [int(i.split("_")[1]) for i in dirs if "run_" in i]
+    save_dir = os.path.join(save_dir, f"run_{max(dirs) + 1 if len(dirs) > 0 else 1}")
+else:
+    save_dir = os.path.join(save_dir, "run_1")
+mkdir(save_dir)
 
 transform = transforms.Compose([
     transforms.RandomHorizontalFlip(),
@@ -145,12 +154,12 @@ for epoch in list(range(1, int(total_epoch) + 1)):
         eval_loss["val_loss"].append(val_loss)
         eval_loss["val_accuracy"].append(val_accuracy)
 
-        save_model(net_model=net, save_dir=save_dir, optimizer=None, ex="_iteration_{}".format(epoch))
+        save_model(net_model=net, save_dir=save_dir, optimizer=None, ex="iteration_{}".format(epoch))
         if val_loss <= loss_min:
             loss_min = val_loss
             io.save("Best Epoch: {}, Loss: {}, Accuracy: {}".format(epoch, val_loss, val_accuracy),
                     os.path.join(save_dir, "best.txt"))
-            save_model(net_model=net, save_dir=save_dir, optimizer=optimizer, ex="_best")
+            save_model(net_model=net, save_dir=save_dir, optimizer=optimizer, ex="best")
 
         io.save(running_loss, os.path.join(save_dir, "running_loss.bin"))
         io.save(eval_loss, os.path.join(save_dir, "eval_loss.bin"))

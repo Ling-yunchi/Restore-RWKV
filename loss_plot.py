@@ -4,8 +4,9 @@ from data.common import dataIO
 
 io = dataIO()
 
-running_loss_path = "experiment/Restore_RWKV/running_loss.bin"
-eval_loss_path = "experiment/Restore_RWKV/eval_loss.bin"
+run_id = 0
+running_loss_path = f"experiment/Restore_RWKV/run_{run_id}/running_loss.bin"
+eval_loss_path = f"experiment/Restore_RWKV/run_{run_id}/eval_loss.bin"
 
 running_loss = io.load(running_loss_path)
 eval_loss = io.load(eval_loss_path)
