@@ -34,8 +34,10 @@ def save_model(net_model, save_dir, optimizer=None, ex=""):
 Testing Code
 '''
 
-total_iteration = int(3e5)
-val_iteration = int(1e3)
+total_epoch = int(3e5)
+val_interval = int(1e3)
+save_interval = int(1e2)
+
 lr = 2e-4
 
 batch_size = 1
@@ -46,18 +48,20 @@ loss_min = 0
 data_root = "./dataset/1-DATA WITH GROUND-TRUTH LABELS"
 save_dir = "experiment/Restore_RWKV"
 
+img_size = (256, 256)
+
 transform = transforms.Compose([
     transforms.RandomHorizontalFlip(),
     transforms.RandomVerticalFlip(),
     transforms.RandomRotation(90),
     transforms.RandomAffine(0, translate=(0.1, 0.1)),
-    transforms.Resize((256, 256)),
+    transforms.Resize(img_size),
 ])
 
 train_dataset = HYPSO1_Dataset(data_root, train=True, transform=transform)
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
 
-valid_dataset = HYPSO1_Dataset(data_root, train=False, transform=transforms.Resize((256, 256)))
+valid_dataset = HYPSO1_Dataset(data_root, train=False, transform=transforms.Resize(img_size))
 valid_loader = DataLoader(valid_dataset, batch_size=1, shuffle=False)
 
 modality_list = ["MRI"]
@@ -66,7 +70,7 @@ net = Restore_RWKV(inp_channels=120, out_channels=3, add_raw=False)
 net.cuda()
 
 optimizer = torch.optim.Adam(net.parameters(), lr=lr, betas=(0.9, 0.999), eps=eps)
-lr_scheduler = CosineAnnealingLR(optimizer, total_iteration, eta_min=1.0e-6)
+lr_scheduler = CosineAnnealingLR(optimizer, total_epoch, eta_min=1.0e-6)
 criterion = nn.CrossEntropyLoss().cuda()
 
 running_loss = []
@@ -76,8 +80,8 @@ eval_loss = {
 }
 
 print("################ Train ################")
-pbar = tqdm(total=int(total_iteration))
-for iteration in list(range(1, int(total_iteration) + 1)):
+pbar = tqdm(total=int(total_epoch))
+for epoch in list(range(1, int(total_epoch) + 1)):
 
     l_G = []
     train_data, train_label = next(DataSampler(train_loader))
@@ -97,9 +101,10 @@ for iteration in list(range(1, int(total_iteration) + 1)):
     torch.cuda.empty_cache()
     lr_scheduler.step()
 
-    # save_model(net_model=net, save_dir=save_dir, optimizer=None, ex="_iteration_{}".format(iteration))
+    if epoch % save_interval == 0:
+        save_model(net_model=net, save_dir=save_dir, optimizer=None, ex="_iteration_{}".format(epoch))
 
-    if True:  # iteration % val_iteration == 0:
+    if epoch % val_interval == 0:
         val_loss = 0
         val_accuracy = 0
         net.eval()
@@ -129,10 +134,10 @@ for iteration in list(range(1, int(total_iteration) + 1)):
         eval_loss["val_loss"].append(val_loss)
         eval_loss["val_accuracy"].append(val_accuracy)
 
-        save_model(net_model=net, save_dir=save_dir, optimizer=None, ex="_iteration_{}".format(iteration))
+        save_model(net_model=net, save_dir=save_dir, optimizer=None, ex="_iteration_{}".format(epoch))
         if val_loss <= loss_min:
             loss_min = val_loss
-            io.save("Best Iteration: {}, Loss: {}, Accuracy: {}".format(iteration, val_loss, val_accuracy),
+            io.save("Best Epoch: {}, Loss: {}, Accuracy: {}".format(epoch, val_loss, val_accuracy),
                     os.path.join(save_dir, "best.txt"))
             save_model(net_model=net, save_dir=save_dir, optimizer=optimizer, ex="_best")
         io.save(eval_loss, os.path.join(save_dir, "evaluationLoss.bin"))
