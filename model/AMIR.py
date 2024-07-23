@@ -1,13 +1,11 @@
+import numbers
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numbers
-from einops import rearrange 
+from einops import rearrange
 from torch.distributions.normal import Normal
-import numpy as np
-
-
-
 
 
 class Mlp(nn.Module):
@@ -133,7 +131,6 @@ class SparseDispatcher(object):
 
 
 class MoE(nn.Module):
-
     """Call a Sparsely gated mixture of experts layer with 1-layer Feed-Forward networks as experts.
     Args:
     input_size: integer - size of the input
@@ -151,15 +148,16 @@ class MoE(nn.Module):
         self.input_size = input_size
         self.k = use_experts
         # instantiate experts
-        self.experts = nn.ModuleList([Mlp(input_size, h_feat=int(input_size*mlp_ratio), out_feat=output_size) for i in range(self.num_experts)])
-        self.w_gate = nn.Parameter(torch.randn(2*input_size, num_experts), requires_grad=True)
-        self.w_noise = nn.Parameter(torch.zeros(2*input_size, num_experts), requires_grad=True)
+        self.experts = nn.ModuleList([Mlp(input_size, h_feat=int(input_size * mlp_ratio), out_feat=output_size) for i in
+                                      range(self.num_experts)])
+        self.w_gate = nn.Parameter(torch.randn(2 * input_size, num_experts), requires_grad=True)
+        self.w_noise = nn.Parameter(torch.zeros(2 * input_size, num_experts), requires_grad=True)
 
         self.softplus = nn.Softplus()
         self.softmax = nn.Softmax(1)
         self.register_buffer("mean", torch.tensor([0.0]))
         self.register_buffer("std", torch.tensor([1.0]))
-        assert(self.k <= self.num_experts) 
+        assert (self.k <= self.num_experts)
 
     def cv_squared(self, x):
         """The squared coefficient of variation of a sample.
@@ -176,7 +174,7 @@ class MoE(nn.Module):
 
         if x.shape[0] == 1:
             return torch.tensor([0], device=x.device, dtype=x.dtype)
-        return x.float().var() / (x.float().mean()**2 + eps)
+        return x.float().var() / (x.float().mean() ** 2 + eps)
 
     def _gates_to_load(self, gates):
         """Compute the true load per expert, given the gates.
@@ -216,8 +214,8 @@ class MoE(nn.Module):
         threshold_if_out = torch.unsqueeze(torch.gather(top_values_flat, 0, threshold_positions_if_out), 1)
         # is each value currently in the top k.
         normal = Normal(self.mean, self.std)
-        prob_if_in = normal.cdf((clean_values - threshold_if_in)/noise_stddev)
-        prob_if_out = normal.cdf((clean_values - threshold_if_out)/noise_stddev)
+        prob_if_in = normal.cdf((clean_values - threshold_if_in) / noise_stddev)
+        prob_if_out = normal.cdf((clean_values - threshold_if_out) / noise_stddev)
         prob = torch.where(is_in, prob_if_in, prob_if_out)
         return prob
 
@@ -266,20 +264,19 @@ class MoE(nn.Module):
         extra_training_loss: a scalar.  This should be added into the overall
         training loss of the model.  The backpropagation of this loss
         encourages all experts to be approximately equally used across a batch.
-        """ 
-        
+        """
+
         # import pdb 
         # pdb.set_trace() 
-        
+
         B, C, H, W = x.shape
-        prompt = prompt.unsqueeze(-1).unsqueeze(-1).expand_as(x) 
-        
-        
-        x = rearrange(x, 'b c h w -> (b h w) c') 
-        prompt = rearrange(prompt, 'b c h w -> (b h w) c') 
-        
-        x_gating = torch.cat((x, prompt), dim=1) #[B, 2C, H, W]
-        
+        prompt = prompt.unsqueeze(-1).unsqueeze(-1).expand_as(x)
+
+        x = rearrange(x, 'b c h w -> (b h w) c')
+        prompt = rearrange(prompt, 'b c h w -> (b h w) c')
+
+        x_gating = torch.cat((x, prompt), dim=1)  # [B, 2C, H, W]
+
         gates, load = self.noisy_top_k_gating(x_gating, self.training)
         # calculate importance loss
         importance = gates.sum(0)
@@ -290,42 +287,43 @@ class MoE(nn.Module):
         expert_inputs = dispatcher.dispatch(x)
         gates = dispatcher.expert_to_gates()
         expert_outputs = [self.experts[i](expert_inputs[i]) for i in range(self.num_experts)]
-        y = dispatcher.combine(expert_outputs) 
-        
+        y = dispatcher.combine(expert_outputs)
+
         y = rearrange(y, '(b h w) c -> b c h w', b=B, h=H, w=W)
-        
+
         return y, loss
 
 
 class RIN(nn.Module):
     def __init__(self, in_dim, atom_num=16, atom_dim=256):
         super(RIN, self).__init__()
-        
+
         # Condtion network 
         hidden_dim = 64
         self.CondNet = nn.Sequential(nn.Conv2d(in_dim, hidden_dim, 3, 3), nn.LeakyReLU(0.1, True),
-                                     nn.Conv2d(hidden_dim, hidden_dim, 3,3), nn.LeakyReLU(0.1, True),
+                                     nn.Conv2d(hidden_dim, hidden_dim, 3, 3), nn.LeakyReLU(0.1, True),
                                      nn.Conv2d(hidden_dim, hidden_dim, 1), nn.LeakyReLU(0.1, True),
                                      nn.Conv2d(hidden_dim, hidden_dim, 1), nn.LeakyReLU(0.1, True),
-                                     nn.Conv2d(hidden_dim, 32, 1)) 
-        
-        self.lastOut = nn.Linear(32, atom_num) 
+                                     nn.Conv2d(hidden_dim, 32, 1))
+
+        self.lastOut = nn.Linear(32, atom_num)
         self.act = nn.GELU()
-        
+
         self.dictionary = nn.Parameter(torch.randn(atom_num, atom_dim), requires_grad=True)
+
     def forward(self, x):
         out = self.CondNet(x)
         out = nn.AdaptiveAvgPool2d(1)(out)
         out = out.view(out.size(0), -1)
-        out = self.lastOut(out) 
-        logits = F.softmax(out, -1) 
-        out = logits @ self.dictionary 
+        out = self.lastOut(out)
+        logits = F.softmax(out, -1)
+        out = logits @ self.dictionary
         out = self.act(out)
-        return out 
+        return out
+
+    # class AdaIN(nn.Module):
 
 
-
-# class AdaIN(nn.Module):
 #     def __init__(self, dim_content, dim_style):
 #         super(AdaIN, self).__init__()
 
@@ -338,18 +336,15 @@ class RIN(nn.Module):
 #         content_mean = torch.mean(content, dim=(2, 3), keepdim=True)
 #         content_std = torch.std(content, dim=(2, 3), keepdim=True)
 #         normalized_content = (content - content_mean) / (content_std + 1e-8)
-        
+
 #         # 调整样式
 #         style_mean = self.affine_mean(style).view(b, c, 1, 1)
 #         style_std = self.affine_std(style).view(b, c, 1, 1)
-        
+
 #         # 使用样式信息重新缩放和偏移内容特征
 #         output = style_std * normalized_content + style_mean
 
 #         return output 
-
-
-
 
 
 ##########################################################################
@@ -358,8 +353,10 @@ class RIN(nn.Module):
 def to_3d(x):
     return rearrange(x, 'b c h w -> b (h w) c')
 
-def to_4d(x,h,w):
-    return rearrange(x, 'b (h w) c -> b c h w',h=h,w=w)
+
+def to_4d(x, h, w):
+    return rearrange(x, 'b (h w) c -> b c h w', h=h, w=w)
+
 
 class BiasFree_LayerNorm(nn.Module):
     def __init__(self, normalized_shape):
@@ -375,7 +372,8 @@ class BiasFree_LayerNorm(nn.Module):
 
     def forward(self, x):
         sigma = x.var(-1, keepdim=True, unbiased=False)
-        return x / torch.sqrt(sigma+1e-5) * self.weight
+        return x / torch.sqrt(sigma + 1e-5) * self.weight
+
 
 class WithBias_LayerNorm(nn.Module):
     def __init__(self, normalized_shape):
@@ -393,13 +391,13 @@ class WithBias_LayerNorm(nn.Module):
     def forward(self, x):
         mu = x.mean(-1, keepdim=True)
         sigma = x.var(-1, keepdim=True, unbiased=False)
-        return (x - mu) / torch.sqrt(sigma+1e-5) * self.weight + self.bias
+        return (x - mu) / torch.sqrt(sigma + 1e-5) * self.weight + self.bias
 
 
 class LayerNorm(nn.Module):
     def __init__(self, dim, LayerNorm_type):
         super(LayerNorm, self).__init__()
-        if LayerNorm_type =='BiasFree':
+        if LayerNorm_type == 'BiasFree':
             self.body = BiasFree_LayerNorm(dim)
         else:
             self.body = WithBias_LayerNorm(dim)
@@ -409,18 +407,18 @@ class LayerNorm(nn.Module):
         return to_4d(self.body(to_3d(x)), h, w)
 
 
-
 ##########################################################################
 ## Gated-Dconv Feed-Forward Network (GDFN)
 class FeedForward(nn.Module):
     def __init__(self, dim, ffn_expansion_factor, bias):
         super(FeedForward, self).__init__()
 
-        hidden_features = int(dim*ffn_expansion_factor)
+        hidden_features = int(dim * ffn_expansion_factor)
 
-        self.project_in = nn.Conv2d(dim, hidden_features*2, kernel_size=1, bias=bias)
+        self.project_in = nn.Conv2d(dim, hidden_features * 2, kernel_size=1, bias=bias)
 
-        self.dwconv = nn.Conv2d(hidden_features*2, hidden_features*2, kernel_size=3, stride=1, padding=1, groups=hidden_features*2, bias=bias)
+        self.dwconv = nn.Conv2d(hidden_features * 2, hidden_features * 2, kernel_size=3, stride=1, padding=1,
+                                groups=hidden_features * 2, bias=bias)
 
         self.project_out = nn.Conv2d(hidden_features, dim, kernel_size=1, bias=bias)
 
@@ -432,7 +430,6 @@ class FeedForward(nn.Module):
         return x
 
 
-
 ##########################################################################
 ## Multi-DConv Head Transposed Self-Attention (MDTA)
 class Attention(nn.Module):
@@ -441,18 +438,16 @@ class Attention(nn.Module):
         self.num_heads = num_heads
         self.temperature = nn.Parameter(torch.ones(num_heads, 1, 1))
 
-        self.qkv = nn.Conv2d(dim, dim*3, kernel_size=1, bias=bias)
-        self.qkv_dwconv = nn.Conv2d(dim*3, dim*3, kernel_size=3, stride=1, padding=1, groups=dim*3, bias=bias)
+        self.qkv = nn.Conv2d(dim, dim * 3, kernel_size=1, bias=bias)
+        self.qkv_dwconv = nn.Conv2d(dim * 3, dim * 3, kernel_size=3, stride=1, padding=1, groups=dim * 3, bias=bias)
         self.project_out = nn.Conv2d(dim, dim, kernel_size=1, bias=bias)
-        
-
 
     def forward(self, x):
-        b,c,h,w = x.shape
+        b, c, h, w = x.shape
 
         qkv = self.qkv_dwconv(self.qkv(x))
-        q,k,v = qkv.chunk(3, dim=1)   
-        
+        q, k, v = qkv.chunk(3, dim=1)
+
         q = rearrange(q, 'b (head c) h w -> b head c (h w)', head=self.num_heads)
         k = rearrange(k, 'b (head c) h w -> b head c (h w)', head=self.num_heads)
         v = rearrange(v, 'b (head c) h w -> b head c (h w)', head=self.num_heads)
@@ -464,12 +459,11 @@ class Attention(nn.Module):
         attn = attn.softmax(dim=-1)
 
         out = (attn @ v)
-        
+
         out = rearrange(out, 'b head c (h w) -> b (head c) h w', head=self.num_heads, h=h, w=w)
 
         out = self.project_out(out)
         return out
-
 
 
 ##########################################################################
@@ -495,31 +489,29 @@ class Channel_Routing(nn.Module):
         super(Channel_Routing, self).__init__()
         self.fc = nn.Linear(atom_dim, dim)
         self.beta = nn.Parameter(torch.zeros((1, dim, 1, 1)), requires_grad=True)
-        self.gamma = nn.Parameter(torch.zeros((1, dim, 1, 1)), requires_grad=True) 
+        self.gamma = nn.Parameter(torch.zeros((1, dim, 1, 1)), requires_grad=True)
 
     def forward(self, x, prompt):
         gating_factors = torch.sigmoid(self.fc(prompt))
         gating_factors = gating_factors.unsqueeze(-1).unsqueeze(-1)
 
-        out = x * self.gamma + self.beta  
-        out = out * gating_factors 
-             
+        out = x * self.gamma + self.beta
+        out = out * gating_factors
+
         return x + out
 
 
 class Spatial_Routing(nn.Module):
     def __init__(self, atom_dim, dim, ffn_expansion_factor):
-        super(Spatial_Routing, self).__init__() 
-        
-        self.fc = nn.Linear(atom_dim, dim) 
-        self.moe = MoE(dim, dim, mlp_ratio=ffn_expansion_factor, num_experts=4, noisy_gating=True, use_experts=2) 
+        super(Spatial_Routing, self).__init__()
 
-    def forward(self, x, prompt): 
-        d = self.fc(prompt) 
-        out, loss = self.moe(x, d) 
+        self.fc = nn.Linear(atom_dim, dim)
+        self.moe = MoE(dim, dim, mlp_ratio=ffn_expansion_factor, num_experts=4, noisy_gating=True, use_experts=2)
+
+    def forward(self, x, prompt):
+        d = self.fc(prompt)
+        out, loss = self.moe(x, d)
         return out + x, loss
-
-
 
 
 ##########################################################################
@@ -536,189 +528,198 @@ class OverlapPatchEmbed(nn.Module):
         return x
 
 
-
 ##########################################################################
 ## Resizing modules
 class Downsample(nn.Module):
     def __init__(self, n_feat):
         super(Downsample, self).__init__()
 
-        self.body = nn.Sequential(nn.Conv2d(n_feat, n_feat//2, kernel_size=3, stride=1, padding=1, bias=False),
+        self.body = nn.Sequential(nn.Conv2d(n_feat, n_feat // 2, kernel_size=3, stride=1, padding=1, bias=False),
                                   nn.PixelUnshuffle(2))
 
     def forward(self, x):
         return self.body(x)
 
+
 class Upsample(nn.Module):
     def __init__(self, n_feat):
         super(Upsample, self).__init__()
 
-        self.body = nn.Sequential(nn.Conv2d(n_feat, n_feat*2, kernel_size=3, stride=1, padding=1, bias=False),
+        self.body = nn.Sequential(nn.Conv2d(n_feat, n_feat * 2, kernel_size=3, stride=1, padding=1, bias=False),
                                   nn.PixelShuffle(2))
 
     def forward(self, x):
         return self.body(x)
 
+
 ##########################################################################
 ##---------- AMIR -----------------------
 class AMIR(nn.Module):
-    def __init__(self, 
-        inp_channels=1, 
-        out_channels=1, 
-        dim = 42,
-        num_blocks = [5,7,7,9], 
-        num_refinement_blocks = 4,
-        heads = [1,2,4,8],
-        ffn_expansion_factor = 2.66,
-        bias = False,
-        LayerNorm_type = 'WithBias',   ## Other option 'BiasFree'
-        dual_pixel_task = False        ## True for dual-pixel defocus deblurring only. Also set inp_channels=6
-    ):
+    def __init__(self,
+                 inp_channels=1,
+                 out_channels=1,
+                 dim=42,
+                 num_blocks=[5, 7, 7, 9],
+                 num_refinement_blocks=4,
+                 heads=[1, 2, 4, 8],
+                 ffn_expansion_factor=2.66,
+                 bias=False,
+                 LayerNorm_type='WithBias',  ## Other option 'BiasFree'
+                 dual_pixel_task=False  ## True for dual-pixel defocus deblurring only. Also set inp_channels=6
+                 ):
 
         super(AMIR, self).__init__()
 
-        self.patch_embed = OverlapPatchEmbed(inp_channels, dim) 
-        
-        atom_dim = 256 
-        atom_num = 32 
-        self.dict_generator = RIN(in_dim=inp_channels, atom_num=atom_num, atom_dim=atom_dim) 
-        
-        self.spatial_routing_encoder_level1 = Spatial_Routing(atom_dim = atom_dim, dim=dim,  ffn_expansion_factor=ffn_expansion_factor) 
-        self.spatial_routing_encoder_level2 = Spatial_Routing(atom_dim = atom_dim, dim=int(dim*2**1), ffn_expansion_factor=ffn_expansion_factor)
-        self.spatial_routing_encoder_level3 = Spatial_Routing(atom_dim = atom_dim, dim=int(dim*2**2), ffn_expansion_factor=ffn_expansion_factor)
-        
-        self.channel_routing_latent = Channel_Routing(atom_dim = atom_dim, dim=int(dim*2**3)) 
-        self.channel_routing_decoder_level3 = Channel_Routing(atom_dim = atom_dim, dim=int(dim*2**2)) 
-        self.channel_routing_decoder_level2 = Channel_Routing(atom_dim = atom_dim, dim=int(dim*2**1)) 
-        self.channel_routing_decoder_level1 = Channel_Routing(atom_dim = atom_dim, dim=int(dim*2**1)) 
+        self.patch_embed = OverlapPatchEmbed(inp_channels, dim)
+
+        atom_dim = 256
+        atom_num = 32
+        self.dict_generator = RIN(in_dim=inp_channels, atom_num=atom_num, atom_dim=atom_dim)
+
+        self.spatial_routing_encoder_level1 = Spatial_Routing(atom_dim=atom_dim, dim=dim,
+                                                              ffn_expansion_factor=ffn_expansion_factor)
+        self.spatial_routing_encoder_level2 = Spatial_Routing(atom_dim=atom_dim, dim=int(dim * 2 ** 1),
+                                                              ffn_expansion_factor=ffn_expansion_factor)
+        self.spatial_routing_encoder_level3 = Spatial_Routing(atom_dim=atom_dim, dim=int(dim * 2 ** 2),
+                                                              ffn_expansion_factor=ffn_expansion_factor)
+
+        self.channel_routing_latent = Channel_Routing(atom_dim=atom_dim, dim=int(dim * 2 ** 3))
+        self.channel_routing_decoder_level3 = Channel_Routing(atom_dim=atom_dim, dim=int(dim * 2 ** 2))
+        self.channel_routing_decoder_level2 = Channel_Routing(atom_dim=atom_dim, dim=int(dim * 2 ** 1))
+        self.channel_routing_decoder_level1 = Channel_Routing(atom_dim=atom_dim, dim=int(dim * 2 ** 1))
         # self.channel_routing_decoder_refine = Channel_Routing(dim=int(dim*2**1), degradation_dim=dim_degradation)
 
-        self.encoder_level1 = nn.Sequential(*[TransformerBlock(dim=dim, num_heads=heads[0], ffn_expansion_factor=ffn_expansion_factor, bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_blocks[0])])
-        
-        self.down1_2 = Downsample(dim) ## From Level 1 to Level 2
-        self.encoder_level2 = nn.Sequential(*[TransformerBlock(dim=int(dim*2**1), num_heads=heads[1], ffn_expansion_factor=ffn_expansion_factor, bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_blocks[1])])
-        
-        self.down2_3 = Downsample(int(dim*2**1)) ## From Level 2 to Level 3
-        self.encoder_level3 = nn.Sequential(*[TransformerBlock(dim=int(dim*2**2), num_heads=heads[2], ffn_expansion_factor=ffn_expansion_factor, bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_blocks[2])])
+        self.encoder_level1 = nn.Sequential(*[
+            TransformerBlock(dim=dim, num_heads=heads[0], ffn_expansion_factor=ffn_expansion_factor, bias=bias,
+                             LayerNorm_type=LayerNorm_type) for i in range(num_blocks[0])])
 
-        self.down3_4 = Downsample(int(dim*2**2)) ## From Level 3 to Level 4
-        self.latent = nn.Sequential(*[TransformerBlock(dim=int(dim*2**3), num_heads=heads[3], ffn_expansion_factor=ffn_expansion_factor, bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_blocks[3])])
-        
-        self.up4_3 = Upsample(int(dim*2**3)) ## From Level 4 to Level 3
-        self.reduce_chan_level3 = nn.Conv2d(int(dim*2**3), int(dim*2**2), kernel_size=1, bias=bias)
-        self.decoder_level3 = nn.Sequential(*[TransformerBlock(dim=int(dim*2**2), num_heads=heads[2], ffn_expansion_factor=ffn_expansion_factor, bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_blocks[2])])
+        self.down1_2 = Downsample(dim)  ## From Level 1 to Level 2
+        self.encoder_level2 = nn.Sequential(*[
+            TransformerBlock(dim=int(dim * 2 ** 1), num_heads=heads[1], ffn_expansion_factor=ffn_expansion_factor,
+                             bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_blocks[1])])
 
+        self.down2_3 = Downsample(int(dim * 2 ** 1))  ## From Level 2 to Level 3
+        self.encoder_level3 = nn.Sequential(*[
+            TransformerBlock(dim=int(dim * 2 ** 2), num_heads=heads[2], ffn_expansion_factor=ffn_expansion_factor,
+                             bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_blocks[2])])
 
-        self.up3_2 = Upsample(int(dim*2**2)) ## From Level 3 to Level 2
-        self.reduce_chan_level2 = nn.Conv2d(int(dim*2**2), int(dim*2**1), kernel_size=1, bias=bias)
-        self.decoder_level2 = nn.Sequential(*[TransformerBlock(dim=int(dim*2**1), num_heads=heads[1], ffn_expansion_factor=ffn_expansion_factor, bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_blocks[1])])
-        
-        self.up2_1 = Upsample(int(dim*2**1))  ## From Level 2 to Level 1  (NO 1x1 conv to reduce channels)
+        self.down3_4 = Downsample(int(dim * 2 ** 2))  ## From Level 3 to Level 4
+        self.latent = nn.Sequential(*[
+            TransformerBlock(dim=int(dim * 2 ** 3), num_heads=heads[3], ffn_expansion_factor=ffn_expansion_factor,
+                             bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_blocks[3])])
 
-        self.decoder_level1 = nn.Sequential(*[TransformerBlock(dim=int(dim*2**1), num_heads=heads[0], ffn_expansion_factor=ffn_expansion_factor, bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_blocks[0])])
-        
-        self.refinement = nn.Sequential(*[TransformerBlock(dim=int(dim*2**1), num_heads=heads[0], ffn_expansion_factor=ffn_expansion_factor, bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_refinement_blocks)])
-        
+        self.up4_3 = Upsample(int(dim * 2 ** 3))  ## From Level 4 to Level 3
+        self.reduce_chan_level3 = nn.Conv2d(int(dim * 2 ** 3), int(dim * 2 ** 2), kernel_size=1, bias=bias)
+        self.decoder_level3 = nn.Sequential(*[
+            TransformerBlock(dim=int(dim * 2 ** 2), num_heads=heads[2], ffn_expansion_factor=ffn_expansion_factor,
+                             bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_blocks[2])])
 
-            
-        self.output = nn.Conv2d(int(dim*2**1), out_channels, kernel_size=3, stride=1, padding=1, bias=bias)
+        self.up3_2 = Upsample(int(dim * 2 ** 2))  ## From Level 3 to Level 2
+        self.reduce_chan_level2 = nn.Conv2d(int(dim * 2 ** 2), int(dim * 2 ** 1), kernel_size=1, bias=bias)
+        self.decoder_level2 = nn.Sequential(*[
+            TransformerBlock(dim=int(dim * 2 ** 1), num_heads=heads[1], ffn_expansion_factor=ffn_expansion_factor,
+                             bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_blocks[1])])
 
-    def forward(self, inp_img): 
-        
+        self.up2_1 = Upsample(int(dim * 2 ** 1))  ## From Level 2 to Level 1  (NO 1x1 conv to reduce channels)
+
+        self.decoder_level1 = nn.Sequential(*[
+            TransformerBlock(dim=int(dim * 2 ** 1), num_heads=heads[0], ffn_expansion_factor=ffn_expansion_factor,
+                             bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_blocks[0])])
+
+        self.refinement = nn.Sequential(*[
+            TransformerBlock(dim=int(dim * 2 ** 1), num_heads=heads[0], ffn_expansion_factor=ffn_expansion_factor,
+                             bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_refinement_blocks)])
+
+        self.output = nn.Conv2d(int(dim * 2 ** 1), out_channels, kernel_size=3, stride=1, padding=1, bias=bias)
+
+    def forward(self, inp_img):
+
         prompt = self.dict_generator(inp_img)
-        
 
         inp_enc_level1 = self.patch_embed(inp_img)
-        
-        inp_enc_level1, loss_tmp = self.spatial_routing_encoder_level1(inp_enc_level1, prompt) 
+
+        inp_enc_level1, loss_tmp = self.spatial_routing_encoder_level1(inp_enc_level1, prompt)
         loss_importance = loss_tmp
-        out_enc_level1 = self.encoder_level1(inp_enc_level1) 
+        out_enc_level1 = self.encoder_level1(inp_enc_level1)
 
-
-
-        inp_enc_level2 = self.down1_2(out_enc_level1) 
-        inp_enc_level2, loss_tmp = self.spatial_routing_encoder_level2(inp_enc_level2, prompt) 
+        inp_enc_level2 = self.down1_2(out_enc_level1)
+        inp_enc_level2, loss_tmp = self.spatial_routing_encoder_level2(inp_enc_level2, prompt)
         loss_importance = loss_importance + loss_tmp
-        out_enc_level2 = self.encoder_level2(inp_enc_level2) 
+        out_enc_level2 = self.encoder_level2(inp_enc_level2)
 
-
-        inp_enc_level3 = self.down2_3(out_enc_level2) 
-        inp_enc_level3, loss_tmp = self.spatial_routing_encoder_level3(inp_enc_level3, prompt) 
+        inp_enc_level3 = self.down2_3(out_enc_level2)
+        inp_enc_level3, loss_tmp = self.spatial_routing_encoder_level3(inp_enc_level3, prompt)
         loss_importance = loss_importance + loss_tmp
-        out_enc_level3 = self.encoder_level3(inp_enc_level3) 
+        out_enc_level3 = self.encoder_level3(inp_enc_level3)
 
-
-        inp_enc_level4 = self.down3_4(out_enc_level3)        
+        inp_enc_level4 = self.down3_4(out_enc_level3)
         inp_enc_level4 = self.channel_routing_latent(inp_enc_level4, prompt)
-        latent = self.latent(inp_enc_level4) 
-        
-                        
+        latent = self.latent(inp_enc_level4)
+
         inp_dec_level3 = self.up4_3(latent)
         inp_dec_level3 = torch.cat([inp_dec_level3, out_enc_level3], 1)
-        inp_dec_level3 = self.reduce_chan_level3(inp_dec_level3) 
+        inp_dec_level3 = self.reduce_chan_level3(inp_dec_level3)
         inp_dec_level3 = self.channel_routing_decoder_level3(inp_dec_level3, prompt)
-        out_dec_level3 = self.decoder_level3(inp_dec_level3) 
-        
+        out_dec_level3 = self.decoder_level3(inp_dec_level3)
 
         inp_dec_level2 = self.up3_2(out_dec_level3)
         inp_dec_level2 = torch.cat([inp_dec_level2, out_enc_level2], 1)
-        inp_dec_level2 = self.reduce_chan_level2(inp_dec_level2) 
+        inp_dec_level2 = self.reduce_chan_level2(inp_dec_level2)
         inp_dec_level2 = self.channel_routing_decoder_level2(inp_dec_level2, prompt)
-        out_dec_level2 = self.decoder_level2(inp_dec_level2) 
-        
+        out_dec_level2 = self.decoder_level2(inp_dec_level2)
 
         inp_dec_level1 = self.up2_1(out_dec_level2)
-        inp_dec_level1 = torch.cat([inp_dec_level1, out_enc_level1], 1) 
+        inp_dec_level1 = torch.cat([inp_dec_level1, out_enc_level1], 1)
         inp_dec_level1 = self.channel_routing_decoder_level1(inp_dec_level1, prompt)
-        out_dec_level1 = self.decoder_level1(inp_dec_level1) 
-        
-        
-        out_dec_level1 = self.refinement(out_dec_level1) 
+        out_dec_level1 = self.decoder_level1(inp_dec_level1)
+
+        out_dec_level1 = self.refinement(out_dec_level1)
         # out_dec_level1 = self.channel_routing_decoder_refine(out_dec_level1, prompt)
 
         out_dec_level1 = self.output(out_dec_level1) + inp_img
 
         if self.training:
-            return out_dec_level1, loss_importance 
-        else: 
-            return out_dec_level1 
-
+            return out_dec_level1, loss_importance
+        else:
+            return out_dec_level1
 
 
 def count_parameters(model):
-    return sum(p.numel() for p in model.parameters() if p.requires_grad) 
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
 
 # model = MedRWKV()
 # num = count_parameters(model) 
 # print(num/1e6)
 if __name__ == "__main__":
-    import os 
-    os.environ['CUDA_VISIBLE_DEVICES']='7' 
+    import os
+
+    os.environ['CUDA_VISIBLE_DEVICES'] = '7'
     # x=torch.zeros((1,3,513,513)).type(torch.FloatTensor).cuda() 
-    
-    import time 
-    
+
+    import time
+
     # # y = mapping(x)
     # G=IPT() 
     # G.cuda()
     # with torch.no_grad():
     #     y=G(x) 
     # # print(time.time()-since) 
-    from thop import profile, clever_format
-    
-    x=torch.zeros((1,1,128, 128)).type(torch.FloatTensor).cuda() 
-    model = AMIR() 
+    # from thop import profile, clever_format
+
+    x = torch.zeros((1, 1, 128, 128)).type(torch.FloatTensor).cuda()
+    model = AMIR()
     # print(model)
-    model.cuda() 
-    
+    model.cuda()
+
     since = time.time()
-    y=model(x)
-    print("time", time.time()-since) 
-    
-    flops, params = profile(model, inputs=(x, ))  
-    flops, params = clever_format([flops, params], '%.6f') 
-    print('flops',flops)
-    print('params', params) 
-    print(count_parameters(model)/1e6)
+    y = model(x)
+    print("time", time.time() - since)
+
+    # flops, params = profile(model, inputs=(x,))
+    # flops, params = clever_format([flops, params], '%.6f')
+    # print('flops', flops)
+    # print('params', params)
+    # print(count_parameters(model) / 1e6)
     # print("FLOPs=", str(flops/1e9) +'{}'.format("G"))
     # print("Params=", str(params/1e6)+'{}'.format("M"))
