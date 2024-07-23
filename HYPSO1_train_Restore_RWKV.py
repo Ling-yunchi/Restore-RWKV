@@ -57,7 +57,7 @@ transform = transforms.Compose([
 train_dataset = HYPSO1_Dataset(data_root, train=True, transform=transform)
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
 
-valid_dataset = HYPSO1_Dataset(data_root, train=False, transform=None)
+valid_dataset = HYPSO1_Dataset(data_root, train=False, transform=transforms.Resize((256, 256)))
 valid_loader = DataLoader(valid_dataset, batch_size=1, shuffle=False)
 
 modality_list = ["MRI"]
@@ -70,7 +70,10 @@ lr_scheduler = CosineAnnealingLR(optimizer, total_iteration, eta_min=1.0e-6)
 criterion = nn.CrossEntropyLoss().cuda()
 
 running_loss = []
-eval_loss = []
+eval_loss = {
+    "val_loss": [],
+    "val_accuracy": []
+}
 
 print("################ Train ################")
 pbar = tqdm(total=int(total_iteration))
@@ -94,32 +97,49 @@ for iteration in list(range(1, int(total_iteration) + 1)):
     torch.cuda.empty_cache()
     lr_scheduler.step()
 
-    save_model(net_model=net, save_dir=save_dir, optimizer=None, ex="_iteration_{}".format(iteration))
+    # save_model(net_model=net, save_dir=save_dir, optimizer=None, ex="_iteration_{}".format(iteration))
 
-    if iteration % val_iteration == 0:
+    if True:  # iteration % val_iteration == 0:
         val_loss = 0
+        val_accuracy = 0
         net.eval()
-        for test_data, test_label in enumerate(tqdm(valid_loader)):
-            test_data, test_label = test_data.type(torch.FloatTensor).cuda(), test_label.type(torch.FloatTensor).cuda()
+        for i, (test_data, test_label) in enumerate(tqdm(valid_loader)):
+            test_data, test_label_f = test_data.type(torch.FloatTensor).cuda(), test_label.type(
+                torch.FloatTensor).cuda()
 
             with torch.no_grad():
                 test_result = net(test_data)
-                test_loss = criterion(test_result, test_label)
+
+                test_loss = criterion(test_result, test_label_f)
                 val_loss += test_loss.item()
+
+                result_classes = torch.argmax(test_result, dim=1)
+                label_classes = torch.argmax(test_label, dim=1).cuda()
+
+                correct = (result_classes == label_classes).sum().item()
+                total = torch.numel(result_classes)
+
+                val_accuracy = correct / total
 
             torch.cuda.empty_cache()
 
         val_loss /= len(valid_loader)
-        eval_loss.append(val_loss)
+        val_accuracy /= len(valid_loader)
+
+        eval_loss["val_loss"].append(val_loss)
+        eval_loss["val_accuracy"].append(val_accuracy)
 
         save_model(net_model=net, save_dir=save_dir, optimizer=None, ex="_iteration_{}".format(iteration))
         if val_loss <= loss_min:
             loss_min = val_loss
-            io.save("Best Iteration: {}, Loss: {}".format(iteration, val_loss), os.path.join(save_dir, "best.txt"))
+            io.save("Best Iteration: {}, Loss: {}, Accuracy: {}".format(iteration, val_loss, val_accuracy),
+                    os.path.join(save_dir, "best.txt"))
             save_model(net_model=net, save_dir=save_dir, optimizer=optimizer, ex="_best")
         io.save(eval_loss, os.path.join(save_dir, "evaluationLoss.bin"))
 
-    pbar.set_description("loss_G:{:6}, val_loss:{:6}".format(train_loss.item(), eval_loss[-1] if eval_loss else 0))
+    pbar.set_description("loss_G:{:6}, val_loss:{:6}, val_accuracy:{:6}"
+                         .format(train_loss.item(), eval_loss["val_loss"][-1] if eval_loss else 0,
+                                 eval_loss["val_accuracy"][-1] if eval_loss else 0))
     pbar.update()
 
 pbar.close()
