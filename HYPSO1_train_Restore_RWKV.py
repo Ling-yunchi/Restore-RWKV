@@ -52,7 +52,6 @@ model_path = None
 img_size = (256, 256)
 
 transform = transforms.Compose([
-    transforms.ToTensor(),
     transforms.RandomHorizontalFlip(),
     transforms.RandomVerticalFlip(),
     transforms.RandomCrop(img_size),
@@ -61,6 +60,7 @@ transform = transforms.Compose([
 
 train_dataset = HYPSO1_Dataset(data_root, train=True, transform=transform)
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+train_sampler = DataSampler(train_loader)
 
 valid_dataset = HYPSO1_Dataset(data_root, train=False, transform=transforms.Resize(img_size))
 valid_loader = DataLoader(valid_dataset, batch_size=1, shuffle=False)
@@ -85,8 +85,7 @@ print("################ Train ################")
 pbar = tqdm(total=int(total_epoch))
 for epoch in list(range(1, int(total_epoch) + 1)):
 
-    l_G = []
-    train_data, train_label = next(DataSampler(train_loader))
+    train_data, train_label = next(iter(train_sampler))
 
     train_data, train_label = train_data.type(torch.FloatTensor).cuda(), train_label.type(torch.FloatTensor).cuda()
 
@@ -99,7 +98,7 @@ for epoch in list(range(1, int(total_epoch) + 1)):
     train_loss.backward()
     optimizer.step()
 
-    l_G.append(train_loss.item())
+    running_loss.append(train_loss.item())
     torch.cuda.empty_cache()
     lr_scheduler.step()
 
@@ -139,7 +138,9 @@ for epoch in list(range(1, int(total_epoch) + 1)):
             io.save("Best Epoch: {}, Loss: {}, Accuracy: {}".format(epoch, val_loss, val_accuracy),
                     os.path.join(save_dir, "best.txt"))
             save_model(net_model=net, save_dir=save_dir, optimizer=optimizer, ex="_best")
-        io.save(eval_loss, os.path.join(save_dir, "evaluationLoss.bin"))
+
+        io.save(running_loss, os.path.join(save_dir, "running_loss.bin"))
+        io.save(eval_loss, os.path.join(save_dir, "eval_loss.bin"))
 
     pbar.set_description("loss_G:{:6}, val_loss:{:6}, val_accuracy:{:6}"
                          .format(train_loss.item(), eval_loss["val_loss"][-1] if eval_loss["val_loss"] else "inf",
