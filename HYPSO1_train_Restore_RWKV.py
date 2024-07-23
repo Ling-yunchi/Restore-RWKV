@@ -35,8 +35,7 @@ Testing Code
 '''
 
 total_epoch = int(3e5)
-val_interval = int(1e3)
-save_interval = int(1e2)
+val_interval = int(20)
 
 lr = 2e-4
 
@@ -47,6 +46,8 @@ loss_min = 0
 
 data_root = "./dataset/1-DATA WITH GROUND-TRUTH LABELS"
 save_dir = "experiment/Restore_RWKV"
+
+model_path = None
 
 img_size = (256, 256)
 
@@ -64,10 +65,11 @@ train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, dr
 valid_dataset = HYPSO1_Dataset(data_root, train=False, transform=transforms.Resize(img_size))
 valid_loader = DataLoader(valid_dataset, batch_size=1, shuffle=False)
 
-modality_list = ["MRI"]
-
 net = Restore_RWKV(inp_channels=120, out_channels=3, add_raw=False)
 net.cuda()
+
+if model_path is not None:
+    net.load_state_dict(torch.load(model_path))
 
 optimizer = torch.optim.Adam(net.parameters(), lr=lr, betas=(0.9, 0.999), eps=eps)
 lr_scheduler = CosineAnnealingLR(optimizer, total_epoch, eta_min=1.0e-6)
@@ -100,9 +102,6 @@ for epoch in list(range(1, int(total_epoch) + 1)):
     l_G.append(train_loss.item())
     torch.cuda.empty_cache()
     lr_scheduler.step()
-
-    if epoch % save_interval == 0:
-        save_model(net_model=net, save_dir=save_dir, optimizer=None, ex="_iteration_{}".format(epoch))
 
     if epoch % val_interval == 0:
         val_loss = 0
@@ -143,8 +142,8 @@ for epoch in list(range(1, int(total_epoch) + 1)):
         io.save(eval_loss, os.path.join(save_dir, "evaluationLoss.bin"))
 
     pbar.set_description("loss_G:{:6}, val_loss:{:6}, val_accuracy:{:6}"
-                         .format(train_loss.item(), eval_loss["val_loss"][-1] if eval_loss["val_loss"] else 0,
-                                 eval_loss["val_accuracy"][-1] if eval_loss["val_accuracy"] else 0))
+                         .format(train_loss.item(), eval_loss["val_loss"][-1] if eval_loss["val_loss"] else "inf",
+                                 eval_loss["val_accuracy"][-1] if eval_loss["val_accuracy"] else "inf"))
     pbar.update()
 
 pbar.close()
