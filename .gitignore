@@ -1,0 +1,9 @@
+.idea
+.vscode
+
+dataset
+!dataset/README.md
+
+/model/cuda/build
+experiment
+

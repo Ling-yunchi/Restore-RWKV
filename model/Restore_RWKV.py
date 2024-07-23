@@ -7,10 +7,12 @@ from torch.nn import functional as F
 
 T_MAX = 512 * 512
 
-
 from torch.utils.cpp_extension import load
+
 wkv_cuda = load(name="wkv", sources=["./model/cuda/wkv_op.cpp", "./model/cuda/wkv_cuda.cu"],
-                verbose=True, extra_cuda_cflags=['-res-usage', '--maxrregcount 60', '--use_fast_math', '-O3', '-Xptxas -O3', f'-DTmax={T_MAX}'])
+                verbose=True, build_directory='./model/cuda/build',
+                extra_cuda_cflags=['-res-usage', '--maxrregcount 60', '--use_fast_math', '-O3', '-Xptxas -O3',
+                                   f'-DTmax={T_MAX}'])
 
 
 class WKV(torch.autograd.Function):

@@ -62,7 +62,7 @@ valid_loader = DataLoader(valid_dataset, batch_size=1, shuffle=False)
 
 modality_list = ["MRI"]
 
-net = Restore_RWKV(inp_channels=120, out_channels=3)
+net = Restore_RWKV(inp_channels=120, out_channels=3, add_raw=False)
 net.cuda()
 
 optimizer = torch.optim.Adam(net.parameters(), lr=lr, betas=(0.9, 0.999), eps=eps)
@@ -93,6 +93,8 @@ for iteration in list(range(1, int(total_iteration) + 1)):
     l_G.append(train_loss.item())
     torch.cuda.empty_cache()
     lr_scheduler.step()
+
+    save_model(net_model=net, save_dir=save_dir, optimizer=None, ex="_iteration_{}".format(iteration))
 
     if iteration % val_iteration == 0:
         val_loss = 0
