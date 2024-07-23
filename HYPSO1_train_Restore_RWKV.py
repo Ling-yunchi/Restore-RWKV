@@ -48,6 +48,7 @@ data_root = "./dataset/1-DATA WITH GROUND-TRUTH LABELS"
 save_dir = "experiment/Restore_RWKV"
 
 model_path = None
+optimizer_path = None
 
 img_size = (256, 256)
 
@@ -67,38 +68,50 @@ valid_loader = DataLoader(valid_dataset, batch_size=1, shuffle=False)
 
 net = Restore_RWKV(inp_channels=120, out_channels=3, add_raw=False)
 net.cuda()
-
-if model_path is not None:
-    net.load_state_dict(torch.load(model_path))
-
 optimizer = torch.optim.Adam(net.parameters(), lr=lr, betas=(0.9, 0.999), eps=eps)
 lr_scheduler = CosineAnnealingLR(optimizer, total_epoch, eta_min=1.0e-6)
 criterion = nn.CrossEntropyLoss().cuda()
 
-running_loss = []
+if model_path is not None:
+    net.load_state_dict(torch.load(model_path))
+if optimizer_path is not None:
+    optimizer.load_state_dict(torch.load(optimizer_path))
+
+running_loss = {
+    "train_loss": [],
+    "train_accuracy": []
+}
 eval_loss = {
     "val_loss": [],
     "val_accuracy": []
 }
 
 print("################ Train ################")
+val_loss = "inf"
+val_accuracy = "inf"
+
 pbar = tqdm(total=int(total_epoch))
 for epoch in list(range(1, int(total_epoch) + 1)):
 
     train_data, train_label = next(iter(train_sampler))
-
-    train_data, train_label = train_data.type(torch.FloatTensor).cuda(), train_label.type(torch.FloatTensor).cuda()
+    train_data, train_label_f = train_data.type(torch.FloatTensor).cuda(), train_label.type(torch.FloatTensor).cuda()
 
     net.train()
     optimizer.zero_grad()
-
     train_result = net(train_data)
-    train_loss = criterion(train_result, train_label)
-
+    train_loss = criterion(train_result, train_label_f)
     train_loss.backward()
     optimizer.step()
 
-    running_loss.append(train_loss.item())
+    train_result_classes = torch.argmax(train_result, dim=1)
+    train_label_classes = torch.argmax(train_label.cuda(), dim=1)
+    train_correct = (train_result_classes == train_label_classes).sum().item()
+    train_total = torch.numel(train_result_classes)
+    train_accuracy = train_correct / train_total
+
+    running_loss["train_loss"].append(train_loss.item())
+    running_loss["train_accuracy"].append(train_accuracy)
+
     torch.cuda.empty_cache()
     lr_scheduler.step()
 
@@ -116,13 +129,13 @@ for epoch in list(range(1, int(total_epoch) + 1)):
                 test_loss = criterion(test_result, test_label_f)
                 val_loss += test_loss.item()
 
-                result_classes = torch.argmax(test_result, dim=1)
-                label_classes = torch.argmax(test_label, dim=1).cuda()
+                test_result_classes = torch.argmax(test_result, dim=1)
+                test_label_classes = torch.argmax(test_label.cuda(), dim=1)
 
-                correct = (result_classes == label_classes).sum().item()
-                total = torch.numel(result_classes)
+                test_correct = (test_result_classes == test_label_classes).sum().item()
+                test_total = torch.numel(test_result_classes)
 
-                val_accuracy = correct / total
+                val_accuracy = test_correct / test_total
 
             torch.cuda.empty_cache()
 
@@ -142,9 +155,8 @@ for epoch in list(range(1, int(total_epoch) + 1)):
         io.save(running_loss, os.path.join(save_dir, "running_loss.bin"))
         io.save(eval_loss, os.path.join(save_dir, "eval_loss.bin"))
 
-    pbar.set_description("loss_G:{:6}, val_loss:{:6}, val_accuracy:{:6}"
-                         .format(train_loss.item(), eval_loss["val_loss"][-1] if eval_loss["val_loss"] else "inf",
-                                 eval_loss["val_accuracy"][-1] if eval_loss["val_accuracy"] else "inf"))
+    pbar.set_description("train_loss:{:6}, train_acc: {:6}, val_loss:{:6}, val_acc:{:6}"
+                         .format(train_loss.item(), train_accuracy, val_loss, val_accuracy))
     pbar.update()
 
 pbar.close()

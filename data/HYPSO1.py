@@ -1,4 +1,5 @@
 import os
+import random
 
 import numpy as np
 import torch
@@ -16,15 +17,17 @@ class SameTransform:
 
     def __call__(self, img, mask):
         seed = torch.randint(0, 2 ** 32, (1,)).item()  # 随机种子
+        random.seed(seed)
         torch.manual_seed(seed)
         img = self.transforms(img)
+        random.seed(seed)
         torch.manual_seed(seed)
         mask = self.transforms(mask)
         return img, mask
 
 
 class HYPSO1_Dataset(Dataset):
-    def __init__(self, root_path, train=True, transform=None):
+    def __init__(self, root_path, train=True, transform=None, _random=False):
         self.root_path = root_path
         self.train = train
         self.transform = SameTransform(transform) if transform else None
@@ -53,6 +56,10 @@ class HYPSO1_Dataset(Dataset):
                     label_file_path = os.path.join(label_dir, label_files[0])
                     self.data_paths.append(data_file_path)
                     self.label_paths.append(label_file_path)
+
+        if _random:
+            random.shuffle(self.data_paths)
+            random.shuffle(self.label_paths)
 
         if self.train:
             self.data_paths = self.data_paths[:int(len(self.data_paths) * self.train_ratio)]
