@@ -143,8 +143,8 @@ for epoch in list(range(1, int(total_epoch) + 1)):
         io.save(eval_loss, os.path.join(save_dir, "evaluationLoss.bin"))
 
     pbar.set_description("loss_G:{:6}, val_loss:{:6}, val_accuracy:{:6}"
-                         .format(train_loss.item(), eval_loss["val_loss"][-1] if eval_loss else 0,
-                                 eval_loss["val_accuracy"][-1] if eval_loss else 0))
+                         .format(train_loss.item(), eval_loss["val_loss"][-1] if eval_loss["val_loss"] else 0,
+                                 eval_loss["val_accuracy"][-1] if eval_loss["val_accuracy"] else 0))
     pbar.update()
 
 pbar.close()
