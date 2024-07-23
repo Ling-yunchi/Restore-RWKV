@@ -42,7 +42,7 @@ lr = 2e-4
 batch_size = 1
 eps = 1e-8
 
-loss_min = 0
+loss_min = 1e8
 
 data_root = "./dataset/1-DATA WITH GROUND-TRUTH LABELS"
 save_dir = "experiment/Restore_RWKV"
@@ -52,11 +52,11 @@ model_path = None
 img_size = (256, 256)
 
 transform = transforms.Compose([
+    transforms.ToTensor(),
     transforms.RandomHorizontalFlip(),
     transforms.RandomVerticalFlip(),
-    transforms.RandomRotation(90),
-    transforms.RandomAffine(0, translate=(0.1, 0.1)),
-    transforms.Resize(img_size),
+    transforms.RandomCrop(img_size),
+    transforms.RandomChoice([transforms.RandomRotation((a, a)) for a in [0, 90, 180, 270]]),
 ])
 
 train_dataset = HYPSO1_Dataset(data_root, train=True, transform=transform)
