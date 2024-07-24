@@ -72,7 +72,7 @@ train_dataset = HYPSO1_Dataset(data_root, train=True, transform=transform)
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
 train_sampler = DataSampler(train_loader)
 
-valid_dataset = HYPSO1_Dataset(data_root, train=False, transform=transforms.Resize(img_size))
+valid_dataset = HYPSO1_Dataset(data_root, train=False, transform=transform)
 valid_loader = DataLoader(valid_dataset, batch_size=1, shuffle=False)
 
 net = Restore_RWKV(inp_channels=120, out_channels=3, add_raw=False)

@@ -27,7 +27,7 @@ class SameTransform:
 
 
 class HYPSO1_Dataset(Dataset):
-    def __init__(self, root_path, train=True, transform=None, _random=False):
+    def __init__(self, root_path, train=True, transform=None, _random=False, _seed=0):
         self.root_path = root_path
         self.train = train
         self.transform = SameTransform(transform) if transform else None
@@ -58,6 +58,7 @@ class HYPSO1_Dataset(Dataset):
                     self.label_paths.append(label_file_path)
 
         if _random:
+            random.seed(_seed)
             random.shuffle(self.data_paths)
             random.shuffle(self.label_paths)
 
@@ -67,6 +68,9 @@ class HYPSO1_Dataset(Dataset):
         else:
             self.data_paths = self.data_paths[int(len(self.data_paths) * self.train_ratio):]
             self.label_paths = self.label_paths[int(len(self.label_paths) * self.train_ratio):]
+
+        ids = [os.path.basename(path).split('-')[0] for path in self.label_paths]
+        print(f"HYPSO1_Dataset mode: {'train' if self.train else 'test'}, ids: {ids}")
 
     def __len__(self):
         return len(self.data_paths)
@@ -92,7 +96,7 @@ class HYPSO1_Dataset(Dataset):
 
 
 class HYPSO1_PNG_Dataset(Dataset):
-    def __init__(self, root_path, train=True, transform=None):
+    def __init__(self, root_path, train=True, transform=None, _random=False, _seed=0):
         self.root_path = root_path
         self.train = train
         self.transform = SameTransform(transform) if transform else None
@@ -121,12 +125,20 @@ class HYPSO1_PNG_Dataset(Dataset):
                     self.data_paths.append(data_file_path)
                     self.label_paths.append(label_file_path)
 
+        if _random:
+            random.seed(_seed)
+            random.shuffle(self.data_paths)
+            random.shuffle(self.label_paths)
+
         if self.train:
             self.data_paths = self.data_paths[:int(len(self.data_paths) * self.train_ratio)]
             self.label_paths = self.label_paths[:int(len(self.label_paths) * self.train_ratio)]
         else:
             self.data_paths = self.data_paths[int(len(self.data_paths) * self.train_ratio):]
             self.label_paths = self.label_paths[int(len(self.label_paths) * self.train_ratio):]
+
+        ids = [os.path.basename(path).split('-')[0] for path in self.data_paths]
+        print(f"HYPSO1_PNG_Dataset mode: {'train' if self.train else 'test'}, ids: {ids}")
 
     def __len__(self):
         return len(self.data_paths)
@@ -162,7 +174,10 @@ def test_HYPSO1_PNG_Dataset():
         transforms.RandomCrop(img_size),
         transforms.RandomChoice([transforms.RandomRotation((a, a)) for a in [0, 90, 180, 270]]),
     ])
-    dataset = HYPSO1_PNG_Dataset(root_path='../dataset/1-DATA WITH GROUND-TRUTH LABELS', transform=transform)
+    dataset = HYPSO1_PNG_Dataset(root_path='../dataset/1-DATA WITH GROUND-TRUTH LABELS', transform=transform,
+                                 _random=True)
+    test_dataset = HYPSO1_PNG_Dataset(root_path='../dataset/1-DATA WITH GROUND-TRUTH LABELS', transform=transform,
+                                        train=False, _random=True)
     dataloader = DataLoader(dataset, batch_size=1)
     datasampler = DataSampler(dataloader)
 
