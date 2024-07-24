@@ -4,9 +4,11 @@ from data.common import dataIO
 
 io = dataIO()
 
-run_id = 0
-running_loss_path = f"experiment/Restore_RWKV/run_{run_id}/running_loss.bin"
-eval_loss_path = f"experiment/Restore_RWKV/run_{run_id}/eval_loss.bin"
+run_id = 1
+run_path = f"experiment/Restore_RWKV/run_{run_id}"
+running_loss_path = run_path + "/running_loss.bin"
+eval_loss_path = run_path + "/eval_loss.bin"
+eval_interval = 20
 
 running_loss = io.load(running_loss_path)
 eval_loss = io.load(eval_loss_path)
@@ -28,15 +30,15 @@ ax2.set_title('Training Accuracy')
 ax2.set_xlabel('Iteration')
 ax2.set_ylabel('Loss')
 
-ax3.plot([i * 20 for i in range(len(val_loss))], val_loss)
+ax3.plot([i * eval_interval for i in range(len(val_loss))], val_loss)
 ax3.set_title('Validation Loss')
 ax3.set_xlabel('Epoch')
 ax3.set_ylabel('Loss')
 
-ax4.plot([i * 20 for i in range(len(val_accuracy))], val_accuracy)
+ax4.plot([i * eval_interval for i in range(len(val_accuracy))], val_accuracy)
 ax4.set_title('Validation Accuracy')
 ax4.set_xlabel('Epoch')
 ax4.set_ylabel('Accuracy')
 
 plt.show()
-plt.savefig("loss_plot.png")
+plt.savefig(run_path + "/loss_plot.png")

@@ -7,3 +7,5 @@ dataset
 /model/cuda/build
 experiment
 
+**/__pycache__/
+**/.ipynb_checkpoints/
