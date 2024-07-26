@@ -69,7 +69,7 @@ class HYPSO1_Dataset(Dataset):
             self.data_paths = self.data_paths[int(len(self.data_paths) * self.train_ratio):]
             self.label_paths = self.label_paths[int(len(self.label_paths) * self.train_ratio):]
 
-        ids = [os.path.basename(path).split('-')[0] for path in self.label_paths]
+        ids = [os.path.basename(path).split('-')[0] for path in self.data_paths]
         print(f"HYPSO1_Dataset mode: {'train' if self.train else 'test'}, ids: {ids}")
 
     def __len__(self):
@@ -206,4 +206,4 @@ def test_HYPSO1_PNG_Dataset():
 
 
 if __name__ == '__main__':
-    test_HYPSO1_PNG_Dataset()
+    test_HYPSO1_Dataset()

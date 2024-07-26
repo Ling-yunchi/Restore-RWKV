@@ -2,13 +2,15 @@ import os
 
 import torch
 from torch import nn
+from torch.functional import F
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 from torchvision.transforms import transforms
 from tqdm import tqdm
 
-from data.HYPSO1 import HYPSO1_Dataset
+from data.HYPSO1 import SameTransform
 from data.MedicalDataUniform import DataSampler
+from data.REDATA import REDATA
 from data.common import dataIO
 from model.Restore_RWKV import Restore_RWKV
 from tools import create_save_dir, save_model
@@ -27,8 +29,8 @@ eps = 1e-8
 
 loss_min = 1e8
 
-data_root = "./dataset/1-DATA WITH GROUND-TRUTH LABELS"
-save_dir = "./experiment/Restore_RWKV"
+data_root = "./dataset/REDATA"
+save_dir = "./experiment/REDATA"
 
 model_path = None
 optimizer_path = None
@@ -37,21 +39,20 @@ img_size = (256, 256)
 
 save_dir = create_save_dir(save_dir)
 
-transform = transforms.Compose([
+transforms = SameTransform(transforms.Compose([
     transforms.RandomHorizontalFlip(),
     transforms.RandomVerticalFlip(),
-    transforms.RandomCrop(img_size),
-    transforms.RandomChoice([transforms.RandomRotation((a, a)) for a in [0, 90, 180, 270]]),
-])
+    transforms.ToTensor(),
+]))
 
-train_dataset = HYPSO1_Dataset(data_root, train=True, transform=transform)
+train_dataset = REDATA(data_root, mode='train', transforms=transforms)
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
 train_sampler = DataSampler(train_loader)
 
-valid_dataset = HYPSO1_Dataset(data_root, train=False, transform=transform)
-valid_loader = DataLoader(valid_dataset, batch_size=1, shuffle=False)
+valid_dataset = REDATA(data_root, mode='test', transforms=transforms)
+valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False)
 
-net = Restore_RWKV(inp_channels=120, out_channels=3, add_raw=False)
+net = Restore_RWKV(inp_channels=1, out_channels=2, add_raw=False)
 net.cuda()
 optimizer = torch.optim.Adam(net.parameters(), lr=lr, betas=(0.9, 0.999), eps=eps)
 lr_scheduler = CosineAnnealingLR(optimizer, total_epoch, eta_min=1.0e-6)
@@ -79,17 +80,19 @@ pbar = tqdm(total=int(total_epoch))
 for epoch in list(range(1, int(total_epoch) + 1)):
 
     train_data, train_label = next(iter(train_sampler))
-    train_data, train_label_f = train_data.type(torch.FloatTensor).cuda(), train_label.type(torch.FloatTensor).cuda()
+    train_data, train_label = train_data.cuda(), train_label.long().cuda()
 
     net.train()
     optimizer.zero_grad()
-    train_result = net(train_data)
+    train_result = net(train_data)  # (b, 2, h, w)
+    train_label_f = F.one_hot(train_label.squeeze(1), num_classes=2).permute(0, 3, 1,
+                                                                                      2).float()  # (b, 2, h, w)
     train_loss = criterion(train_result, train_label_f)
     train_loss.backward()
     optimizer.step()
 
     train_result_classes = torch.argmax(train_result, dim=1)
-    train_label_classes = torch.argmax(train_label.cuda(), dim=1)
+    train_label_classes = train_label
     train_correct = (train_result_classes == train_label_classes).sum().item()
     train_total = torch.numel(train_result_classes)
     train_accuracy = train_correct / train_total

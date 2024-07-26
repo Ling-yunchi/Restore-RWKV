@@ -1,9 +1,10 @@
 import os
-import random
-import torch
-import numpy as np
-import matplotlib.pyplot as plt
 import pickle
+import random
+
+import numpy as np
+import torch
+
 
 def set_seeds(seed=42):
     random.seed(seed)
@@ -14,20 +15,46 @@ def set_seeds(seed=42):
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
 
+
 def mkdir(p, is_file=False):
     if is_file:
-        p, _ =  os.path.split(p)
+        p, _ = os.path.split(p)
     isExists = os.path.exists(p)
     if isExists:
         pass
     else:
         os.makedirs(p)
-        print("make directory successfully:{}".format(p)) 
+        print("make directory successfully:{}".format(p))
+
 
 def load_bin(path):
     with open(path, "rb") as f:
         data = pickle.load(f)
-    return data 
+    return data
+
+
+# save to run_{i} folder
+def create_save_dir(path):
+    if os.path.exists(path):
+        dirs = os.listdir(path)
+        dirs = [int(i.split("_")[1]) for i in dirs if "run_" in i]
+        path = os.path.join(path, f"run_{max(dirs) + 1 if len(dirs) > 0 else 1}")
+    else:
+        path = os.path.join(path, "run_1")
+    mkdir(path)
+    return path
+
+
+def save_model(net_model, save_dir, optimizer=None, ex=""):
+    save_path = os.path.join(save_dir, "model")
+    mkdir(save_path)
+    G_save_path = os.path.join(save_path, 'model_{}.pth'.format(ex))
+    torch.save(net_model.cpu().state_dict(), G_save_path)
+    net_model.cuda()
+
+    if optimizer is not None:
+        opt_G_save_path = os.path.join(save_path, 'optimizer_{}.pth'.format(ex))
+        torch.save(optimizer.state_dict(), opt_G_save_path)
 
 # data = load_bin(r"evaluationLoss.bin")
 # psnr = data['eval_metrics']['loss']
@@ -44,11 +71,11 @@ def load_bin(path):
 #     B, C, H, W = x.shape 
 #     num_H=int((H+2*padding-kernel_size)/stride+1) 
 #     num_W=int((W+2*padding-kernel_size)/stride+1) 
-    
+
 #     x=F.pad(x, (padding,padding,padding,padding))
 #     x_patches = x.unfold(2, kernel_size, stride).unfold(3, kernel_size, stride)  ###(position, kernel_size, stride)
 #     out = x_patches.permute(0, 1, 2, 4, 3, 5).contiguous().view(1,C,kernel_size*num_H,kernel_size*num_W) 
-    
+
 #     return out
 
 
@@ -57,14 +84,14 @@ def load_bin(path):
 #     num_D=int((D+2*padding-kernel_size)/stride+1) 
 #     num_H=int((H+2*padding-kernel_size)/stride+1) 
 #     num_W=int((W+2*padding-kernel_size)/stride+1) 
-    
+
 #     # import pdb 
 #     # pdb.set_trace()
-    
+
 #     x=F.pad(x, (padding, padding, padding, padding, padding, padding))
 #     x_patches = x.unfold(2, kernel_size, stride).unfold(3, kernel_size, stride).unfold(4, kernel_size, stride)  ###(position, kernel_size, stride)
 #     out = x_patches.permute(0, 1, 2, 5, 3, 6, 4, 7).contiguous().view(1, C, kernel_size*num_D, kernel_size*num_H, kernel_size*num_W) 
-    
+
 #     return out
 
 # class logger:
@@ -75,10 +102,10 @@ def load_bin(path):
 #         self.tmp = {}
 #         for s in record_list:
 #             self.tmp[s]=[]
-    
+
 #     def make_tmp_record(self):
-        
-        
+
+
 #     def plot_psnr(self, epoch):
 #         axis = np.linspace(1, epoch, epoch)
 #         for idx_data, d in enumerate(self.args.data_test):
