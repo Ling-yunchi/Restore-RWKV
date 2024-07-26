@@ -19,8 +19,8 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 io = dataIO()
 
-total_epoch = int(3e5)
-val_interval = int(20)
+total_epoch = int(5000)
+val_interval = int(100)
 
 lr = 2e-4
 
@@ -84,9 +84,8 @@ for epoch in list(range(1, int(total_epoch) + 1)):
 
     net.train()
     optimizer.zero_grad()
-    train_result = net(train_data)  # (b, 2, h, w)
-    train_label_f = F.one_hot(train_label.squeeze(1), num_classes=2).permute(0, 3, 1,
-                                                                                      2).float()  # (b, 2, h, w)
+    train_result = net(train_data)
+    train_label_f = F.one_hot(train_label.squeeze(1), num_classes=2).permute(0, 3, 1, 2).float()
     train_loss = criterion(train_result, train_label_f)
     train_loss.backward()
     optimizer.step()
@@ -108,17 +107,17 @@ for epoch in list(range(1, int(total_epoch) + 1)):
         val_accuracy = 0
         net.eval()
         for i, (test_data, test_label) in enumerate(tqdm(valid_loader)):
-            test_data, test_label_f = test_data.type(torch.FloatTensor).cuda(), test_label.type(
-                torch.FloatTensor).cuda()
+            test_data, test_label = test_data.cuda(), test_label.long().cuda()
 
             with torch.no_grad():
                 test_result = net(test_data)
 
+                test_label_f = F.one_hot(test_label.squeeze(1), num_classes=2).permute(0, 3, 1, 2).float()
                 test_loss = criterion(test_result, test_label_f)
                 val_loss += test_loss.item()
 
                 test_result_classes = torch.argmax(test_result, dim=1)
-                test_label_classes = torch.argmax(test_label.cuda(), dim=1)
+                test_label_classes = test_label
 
                 test_correct = (test_result_classes == test_label_classes).sum().item()
                 test_total = torch.numel(test_result_classes)
